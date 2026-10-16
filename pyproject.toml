@@ -1,0 +1,22 @@
+
+[project]
+name = "finalproject-smirnov-egor-26-555"
+version = "0.1.0"
+description = "Консольное приложение для управления виртуальным валютным кошельком"
+requires-python = ">=3.12"
+dependencies = [
+    "prettytable>=3.18.0",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.1",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
