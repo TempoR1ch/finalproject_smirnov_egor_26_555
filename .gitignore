@@ -22,3 +22,8 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Файлы сборки Python
+*.egg-info/
+build/
+dist/

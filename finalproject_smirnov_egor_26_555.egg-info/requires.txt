@@ -1,2 +1,0 @@
-prettytable>=3.18.0
-requests>=2.34.2
