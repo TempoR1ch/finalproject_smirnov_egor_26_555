@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: finalproject-smirnov-egor-26-555
+Version: 0.1.0
+Summary: Консольное приложение для управления виртуальным валютным кошельком
+Requires-Python: >=3.12
+Requires-Dist: prettytable>=3.18.0
+Requires-Dist: requests>=2.34.2

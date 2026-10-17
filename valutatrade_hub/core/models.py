@@ -194,6 +194,7 @@ class Portfolio:
 
     def get_total_value(self, base_currency: str = DEFAULT_BASE_CURRENCY) -> float:
         """Рассчитывает общую стоимость портфеля в базовой валюте."""
+        base_currency = base_currency.strip().upper()
         get_currency(base_currency)
         total = 0.0
 
@@ -215,23 +216,30 @@ class Portfolio:
         database = DatabaseManager()
         rates = database.read_json("data/rates.json", {})
 
-        pair = f"{currency_code}_{base_currency}"
-        if pair in rates:
-            rate = rates[pair]
-            if isinstance(rate, dict):
-                rate = rate.get("rate")
+        if not isinstance(rates, dict):
+            raise ValueError("Некорректный формат кэша валютных курсов.")
 
-            if isinstance(rate, (int, float)) and rate > 0:
-                return float(rate)
+        pairs = rates.get("pairs", rates)
+        if not isinstance(pairs, dict):
+            raise ValueError("Некорректный формат списка валютных пар.")
+
+        pair = f"{currency_code}_{base_currency}"
+        record = pairs.get(pair)
+
+        if isinstance(record, dict):
+            record = record.get("rate")
+
+        if isinstance(record, (int, float)) and record > 0:
+            return float(record)
 
         reverse_pair = f"{base_currency}_{currency_code}"
-        if reverse_pair in rates:
-            rate = rates[reverse_pair]
-            if isinstance(rate, dict):
-                rate = rate.get("rate")
+        record = pairs.get(reverse_pair)
 
-            if isinstance(rate, (int, float)) and rate > 0:
-                return 1 / float(rate)
+        if isinstance(record, dict):
+            record = record.get("rate")
+
+        if isinstance(record, (int, float)) and record > 0:
+            return 1 / float(record)
 
         raise ValueError(
             f"Курс {currency_code}/{base_currency} отсутствует в кэше."
@@ -266,4 +274,3 @@ class Portfolio:
             portfolio._wallets[str(code)] = wallet
 
         return portfolio
-
