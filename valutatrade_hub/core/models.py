@@ -1,4 +1,4 @@
-﻿"""Модели пользователя, валютного кошелька и портфеля."""
+"""Модели пользователя, валютного кошелька и портфеля."""
 
 from datetime import datetime, timezone
 
@@ -87,9 +87,7 @@ class User:
         user._username = str(data["username"])
         user._hashed_password = str(data["hashed_password"])
         user._salt = str(data["salt"])
-        user._registration_date = datetime.fromisoformat(
-            str(data["registration_date"])
-        )
+        user._registration_date = datetime.fromisoformat(str(data["registration_date"]))
         return user
 
 
@@ -123,9 +121,7 @@ class Wallet:
         """Списывает средства при достаточном балансе."""
         self._validate_amount(amount)
         if amount > self._balance:
-            raise InsufficientFundsError(
-                self._balance, amount, self.currency_code
-            )
+            raise InsufficientFundsError(self._balance, amount, self.currency_code)
         self._balance -= amount
 
     def get_balance_info(self) -> dict[str, str | float]:
@@ -241,9 +237,7 @@ class Portfolio:
         if isinstance(record, (int, float)) and record > 0:
             return 1 / float(record)
 
-        raise ValueError(
-            f"Курс {currency_code}/{base_currency} отсутствует в кэше."
-        )
+        raise ValueError(f"Курс {currency_code}/{base_currency} отсутствует в кэше.")
 
     def to_dict(self) -> dict[str, object]:
         """Подготавливает портфель для сохранения в JSON."""

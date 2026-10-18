@@ -81,9 +81,7 @@ class ExchangeRateApiClient(BaseApiClient):
     def fetch_rates(self) -> dict[str, float]:
         """Возвращает курсы фиатных валют относительно USD."""
         if not self.api_key:
-            raise ApiRequestError(
-                "Не задан API-ключ ExchangeRate-API."
-            )
+            raise ApiRequestError("Не задан API-ключ ExchangeRate-API.")
 
         url = f"{EXCHANGE_RATE_API_URL}/{self.api_key}/latest/{DEFAULT_BASE_CURRENCY}"
 

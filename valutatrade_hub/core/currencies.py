@@ -14,9 +14,7 @@ class Currency(ABC):
 
         normalized_code = code.strip().upper()
         if not normalized_code.isalpha() or not 2 <= len(normalized_code) <= 5:
-            raise ValueError(
-                "Код валюты должен содержать от 2 до 5 букв."
-            )
+            raise ValueError("Код валюты должен содержать от 2 до 5 букв.")
 
         self.name = name.strip()
         self.code = normalized_code
@@ -38,8 +36,7 @@ class FiatCurrency(Currency):
     def get_display_info(self) -> str:
         """Возвращает информацию о фиатной валюте."""
         return (
-            f"[FIAT] {self.code} — {self.name} "
-            f"(Страна выпуска: {self.issuing_country})"
+            f"[FIAT] {self.code} — {self.name} (Страна выпуска: {self.issuing_country})"
         )
 
 

@@ -1,4 +1,4 @@
-﻿"""Настройки и пути к данным приложения."""
+"""Настройки и пути к данным приложения."""
 
 import os
 from pathlib import Path
@@ -28,9 +28,7 @@ class SettingsLoader:
         try:
             ttl = int(raw_value)
         except ValueError as error:
-            raise ValueError(
-                "RATES_TTL_SECONDS должен быть целым числом."
-            ) from error
+            raise ValueError("RATES_TTL_SECONDS должен быть целым числом.") from error
 
         if ttl <= 0:
             raise ValueError("RATES_TTL_SECONDS должен быть больше нуля.")

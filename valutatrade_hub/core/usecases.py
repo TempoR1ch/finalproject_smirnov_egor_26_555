@@ -4,9 +4,7 @@ import logging
 from typing import Any
 
 from valutatrade_hub.core.currencies import get_currency
-from valutatrade_hub.core.exceptions import (
-    ApiRequestError,
-)
+from valutatrade_hub.core.exceptions import ApiRequestError
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.decorators import log_action, measure_time
 from valutatrade_hub.infra.database import DatabaseManager
@@ -32,9 +30,7 @@ class UserUseCases:
             raise ValueError("Файл пользователей содержит неверный формат.")
 
         return [
-            User.from_dict(record)
-            for record in records
-            if isinstance(record, dict)
+            User.from_dict(record) for record in records if isinstance(record, dict)
         ]
 
     def _save_users(self, users: list[User]) -> None:
@@ -55,8 +51,7 @@ class UserUseCases:
 
         users = self._load_users()
         if any(
-            user.username.casefold() == normalized_username.casefold()
-            for user in users
+            user.username.casefold() == normalized_username.casefold() for user in users
         ):
             raise ValueError("Пользователь с таким именем уже существует.")
 
@@ -76,9 +71,8 @@ class UserUseCases:
         normalized_username = username.strip().casefold()
 
         for user in self._load_users():
-            if (
-                user.username.casefold() == normalized_username
-                and user.verify_password(password)
+            if user.username.casefold() == normalized_username and user.verify_password(
+                password
             ):
                 logger.info("Выполнен вход пользователя: %s", user.username)
                 return user
@@ -327,10 +321,10 @@ class RatesUseCases:
 
     @log_action
     @measure_time
-    def update_rates(self) -> dict[str, float]:
+    def update_rates(self, source: str | None = None) -> dict[str, float]:
         """Получает и сохраняет актуальные курсы через API."""
         try:
-            return self.updater.run_update()
+            return self.updater.run_update(source=source)
         except ApiRequestError:
             logger.exception("Не удалось обновить валютные курсы.")
             raise

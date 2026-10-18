@@ -1,4 +1,4 @@
-﻿"""Конфигурация сервиса получения валютных курсов."""
+"""Конфигурация сервиса получения валютных курсов."""
 
 from valutatrade_hub.infra.settings import (
     EXCHANGE_RATES_FILE,
