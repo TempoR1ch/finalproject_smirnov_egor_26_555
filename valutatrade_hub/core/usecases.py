@@ -321,8 +321,8 @@ class RatesUseCases:
 
     @log_action
     @measure_time
-    def update_rates(self, source: str | None = None) -> dict[str, float]:
-        """Получает и сохраняет актуальные курсы через API."""
+    def update_rates(self, source: str | None = None) -> dict[str, Any]:
+        """Получает курсы и возвращает результат обновления."""
         try:
             return self.updater.run_update(source=source)
         except ApiRequestError:
