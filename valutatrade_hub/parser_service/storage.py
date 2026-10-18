@@ -1,7 +1,6 @@
 """Хранение текущих валютных курсов и истории обновлений."""
 
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from valutatrade_hub.infra.database import DatabaseManager
 from valutatrade_hub.parser_service.config import (
@@ -65,14 +64,30 @@ class RatesStorage:
         if not isinstance(history, list):
             history = []
 
-        timestamp = datetime.now(timezone.utc).isoformat()
+        existing_ids = {
+            record["id"]
+            for record in history
+            if isinstance(record, dict) and isinstance(record.get("id"), str)
+        }
 
         for pair, rate in rates.items():
             from_currency, to_currency = pair.split("_", maxsplit=1)
+            timestamp_dt = datetime.now(timezone.utc)
+            timestamp = timestamp_dt.isoformat()
+            timestamp_id = timestamp_dt.strftime("%Y%m%dT%H%M%S%fZ")
+
+            record_id = f"{from_currency}_{to_currency}_{timestamp_id}"
+            suffix = 1
+
+            while record_id in existing_ids:
+                record_id = f"{from_currency}_{to_currency}_{timestamp_id}_{suffix}"
+                suffix += 1
+
+            existing_ids.add(record_id)
 
             history.append(
                 {
-                    "id": str(uuid4()),
+                    "id": record_id,
                     "from_currency": from_currency,
                     "to_currency": to_currency,
                     "rate": rate,
