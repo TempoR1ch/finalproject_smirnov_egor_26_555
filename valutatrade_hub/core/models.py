@@ -121,7 +121,11 @@ class Wallet:
         """Списывает средства при достаточном балансе."""
         self._validate_amount(amount)
         if amount > self._balance:
-            raise InsufficientFundsError(self._balance, amount, self.currency_code)
+            raise InsufficientFundsError(
+                self._balance,
+                amount,
+                self.currency_code,
+            )
         self._balance -= amount
 
     def get_balance_info(self) -> dict[str, str | float]:
