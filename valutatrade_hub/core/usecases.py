@@ -1,6 +1,7 @@
 """Бизнес-логика операций с пользователями и валютными портфелями."""
 
 import logging
+import math
 from typing import Any
 
 from valutatrade_hub.core.currencies import get_currency
@@ -212,7 +213,7 @@ class ExchangeUseCases:
         self.rates_storage = rates_storage or RatesStorage()
 
     def get_rate(self, from_currency: str, to_currency: str) -> float:
-        """Возвращает курс обмена из кэша."""
+        """Возвращает курс из кэша, при необходимости конвертируя через USD."""
         source = from_currency.strip().upper()
         target = to_currency.strip().upper()
         get_currency(source)
@@ -223,22 +224,47 @@ class ExchangeUseCases:
 
         current = self.rates_storage.get_current_rates()
         pairs = current.get("pairs", {})
-        pair = f"{source}_{target}"
 
-        if isinstance(pairs, dict):
-            record = pairs.get(pair)
+        if not isinstance(pairs, dict):
+            raise ValueError("Некорректный формат кэша валютных курсов.")
+
+        def find_rate(source_code: str, target_code: str) -> float | None:
+            """Ищет прямой курс или рассчитывает его по обратной паре."""
+
+            record = pairs.get(f"{source_code}_{target_code}")
             if isinstance(record, dict):
                 rate = record.get("rate")
-                if isinstance(rate, (int, float)) and rate > 0:
+                if (
+                    isinstance(rate, (int, float))
+                    and not isinstance(rate, bool)
+                    and math.isfinite(rate)
+                    and rate > 0
+                ):
                     return float(rate)
 
-        reverse_pair = f"{target}_{source}"
-        if isinstance(pairs, dict):
-            record = pairs.get(reverse_pair)
+            record = pairs.get(f"{target_code}_{source_code}")
             if isinstance(record, dict):
                 rate = record.get("rate")
-                if isinstance(rate, (int, float)) and rate > 0:
+                if (
+                    isinstance(rate, (int, float))
+                    and not isinstance(rate, bool)
+                    and math.isfinite(rate)
+                    and rate > 0
+                ):
                     return 1.0 / float(rate)
+
+            return None
+
+        rate = find_rate(source, target)
+        if rate is not None:
+            return rate
+
+        if source != "USD" and target != "USD":
+            source_to_usd = find_rate(source, "USD")
+            usd_to_target = find_rate("USD", target)
+
+            if source_to_usd is not None and usd_to_target is not None:
+                return source_to_usd * usd_to_target
 
         raise ValueError(f"Курс {source}/{target} отсутствует в кэше.")
 
@@ -256,8 +282,8 @@ class ExchangeUseCases:
 
         if code == "USD":
             raise ValueError("Покупка USD за USD не имеет смысла.")
-        if amount <= 0:
-            raise ValueError("Количество валюты должно быть положительным.")
+
+        self._validate_amount(amount)
 
         rate = self.get_rate("USD", code)
         cost = amount / rate
@@ -283,8 +309,8 @@ class ExchangeUseCases:
 
         if code == "USD":
             raise ValueError("Продажа USD за USD не имеет смысла.")
-        if amount <= 0:
-            raise ValueError("Количество валюты должно быть положительным.")
+
+        self._validate_amount(amount)
 
         rate = self.get_rate(code, "USD")
         proceeds = amount * rate
@@ -295,6 +321,17 @@ class ExchangeUseCases:
         wallet.withdraw(amount)
         self.portfolios._get_or_create_wallet(portfolio, "USD").deposit(proceeds)
         self.portfolios._save_portfolios(portfolios)
+
+    @staticmethod
+    def _validate_amount(amount: float) -> None:
+        """Проверяет, что сумма является положительным конечным числом."""
+        if not isinstance(amount, (int, float)) or isinstance(amount, bool):
+            raise ValueError("Количество валюты должно быть числом.")
+
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError(
+                "Количество валюты должно быть положительным конечным числом."
+            )
 
 
 class RatesUseCases:

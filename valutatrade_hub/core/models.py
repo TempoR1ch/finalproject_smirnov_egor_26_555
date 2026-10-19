@@ -1,6 +1,8 @@
 """Модели пользователя, валютного кошелька и портфеля."""
 
+import math
 from datetime import datetime, timezone
+from typing import Callable
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
@@ -108,14 +110,17 @@ class Wallet:
     def balance(self, value: float) -> None:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("Баланс должен быть числом.")
-        if value < 0:
-            raise ValueError("Баланс не может быть отрицательным.")
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("Баланс должен быть конечным неотрицательным числом.")
         self._balance = float(value)
 
     def deposit(self, amount: float) -> None:
         """Пополняет кошелёк на положительную сумму."""
         self._validate_amount(amount)
-        self._balance += amount
+        new_balance = self._balance + amount
+        if not math.isfinite(new_balance):
+            raise ValueError("Баланс после пополнения должен быть конечным числом.")
+        self._balance = new_balance
 
     def withdraw(self, amount: float) -> None:
         """Списывает средства при достаточном балансе."""
@@ -140,9 +145,7 @@ class Wallet:
         """Проверяет, что сумма положительна и является конечным числом."""
         if isinstance(amount, bool) or not isinstance(amount, (int, float)):
             raise ValueError("Сумма должна быть числом.")
-        if amount <= 0 or amount != amount or amount == float("inf"):
-            raise ValueError("Сумма должна быть положительным конечным числом.")
-        if amount == float("-inf"):
+        if not math.isfinite(amount) or amount <= 0:
             raise ValueError("Сумма должна быть положительным конечным числом.")
 
     def to_dict(self) -> dict[str, str | float]:
@@ -192,8 +195,15 @@ class Portfolio:
 
         return self._wallets[normalized_code]
 
-    def get_total_value(self, base_currency: str = DEFAULT_BASE_CURRENCY) -> float:
+    def get_total_value(
+        self,
+        base_currency: str = DEFAULT_BASE_CURRENCY,
+        rate_provider: Callable[[str, str], float] | None = None,
+    ) -> float:
         """Рассчитывает общую стоимость портфеля в базовой валюте."""
+        if not isinstance(base_currency, str) or not base_currency.strip():
+            raise ValueError("Базовая валюта должна быть указана.")
+
         base_currency = base_currency.strip().upper()
         get_currency(base_currency)
         total = 0.0
@@ -201,47 +211,30 @@ class Portfolio:
         for currency_code, wallet in self._wallets.items():
             if currency_code == base_currency:
                 total += wallet.balance
-                continue
+            else:
+                if rate_provider is None:
+                    raise ValueError(
+                        "Для расчёта стоимости портфеля необходим "
+                        "источник курсов валют."
+                    )
 
-            rate = self._get_rate(currency_code, base_currency)
-            total += wallet.balance * rate
+                rate = rate_provider(currency_code, base_currency)
+                if (
+                    isinstance(rate, bool)
+                    or not isinstance(rate, (int, float))
+                    or not math.isfinite(rate)
+                    or rate <= 0
+                ):
+                    raise ValueError("Курс должен быть положительным конечным числом.")
+
+                total += wallet.balance * rate
+
+            if not math.isfinite(total):
+                raise ValueError(
+                    "Общая стоимость портфеля должна быть конечным числом."
+                )
 
         return total
-
-    @staticmethod
-    def _get_rate(currency_code: str, base_currency: str) -> float:
-        """Получает курс пары из локального кэша курсов."""
-        from valutatrade_hub.infra.database import DatabaseManager
-
-        database = DatabaseManager()
-        rates = database.read_json("data/rates.json", {})
-
-        if not isinstance(rates, dict):
-            raise ValueError("Некорректный формат кэша валютных курсов.")
-
-        pairs = rates.get("pairs", rates)
-        if not isinstance(pairs, dict):
-            raise ValueError("Некорректный формат списка валютных пар.")
-
-        pair = f"{currency_code}_{base_currency}"
-        record = pairs.get(pair)
-
-        if isinstance(record, dict):
-            record = record.get("rate")
-
-        if isinstance(record, (int, float)) and record > 0:
-            return float(record)
-
-        reverse_pair = f"{base_currency}_{currency_code}"
-        record = pairs.get(reverse_pair)
-
-        if isinstance(record, dict):
-            record = record.get("rate")
-
-        if isinstance(record, (int, float)) and record > 0:
-            return 1 / float(record)
-
-        raise ValueError(f"Курс {currency_code}/{base_currency} отсутствует в кэше.")
 
     def to_dict(self) -> dict[str, object]:
         """Подготавливает портфель для сохранения в JSON."""

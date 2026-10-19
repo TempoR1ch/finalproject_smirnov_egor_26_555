@@ -5,6 +5,7 @@ import shlex
 
 from prettytable import PrettyTable
 
+from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency
 from valutatrade_hub.core.usecases import (
     ExchangeUseCases,
     PortfolioUseCases,
@@ -28,6 +29,7 @@ class ConsoleInterface:
         """Запускает цикл ввода команд."""
         print("ValutaTrade Hub")
         print("Введите help для списка команд.")
+
         while self.running:
             try:
                 command_line = input("valutatrade> ").strip()
@@ -49,6 +51,7 @@ class ConsoleInterface:
         except ValueError as error:
             print(f"Ошибка разбора команды: {error}")
             return
+
         if not parts:
             return
 
@@ -67,10 +70,12 @@ class ConsoleInterface:
             "show-rates": self.show_rates,
             "exit": self.exit,
         }
+
         handler = commands.get(command)
         if handler is None:
             print(f"Неизвестная команда: {command}. Введите help.")
             return
+
         try:
             handler(args)
         except (ValueError, TypeError) as error:
@@ -88,10 +93,12 @@ class ConsoleInterface:
         allowed = required | (optional or set())
         options = {}
         index = 0
+
         while index < len(args):
             argument = args[index]
             if not argument.startswith("--"):
                 raise ValueError(f"Ожидался именованный аргумент, получено: {argument}")
+
             name = argument[2:]
             if name not in allowed:
                 raise ValueError(f"Неизвестный аргумент: {argument}")
@@ -99,6 +106,7 @@ class ConsoleInterface:
                 raise ValueError(f"Аргумент {argument} указан повторно.")
             if index + 1 >= len(args) or args[index + 1].startswith("--"):
                 raise ValueError(f"Для {argument} необходимо указать значение.")
+
             options[name] = args[index + 1]
             index += 2
 
@@ -106,6 +114,7 @@ class ConsoleInterface:
         if missing:
             names = ", ".join(f"--{name}" for name in sorted(missing))
             raise ValueError(f"Не указаны обязательные аргументы: {names}")
+
         return options
 
     @staticmethod
@@ -115,8 +124,10 @@ class ConsoleInterface:
             amount = float(value)
         except ValueError as error:
             raise ValueError("Количество должно быть числом.") from error
+
         if not math.isfinite(amount) or amount <= 0:
             raise ValueError("Количество должно быть положительным конечным числом.")
+
         return amount
 
     def _require_login(self) -> bool:
@@ -131,6 +142,7 @@ class ConsoleInterface:
         """Показывает список доступных команд."""
         if args:
             raise ValueError("Использование: help")
+
         table = PrettyTable()
         table.field_names = ["Команда", "Аргументы", "Описание"]
         table.add_rows(
@@ -171,20 +183,30 @@ class ConsoleInterface:
     def show_portfolio(self, args: list[str]) -> None:
         """Показывает кошельки и общую стоимость портфеля."""
         options = self._parse_options(args, set(), {"base"})
+
         if not self._require_login():
             return
+
         base_currency = options.get("base", "USD").upper()
         portfolio = self.portfolios.get_portfolio(self.current_user.user_id)
+
         table = PrettyTable()
         table.field_names = ["Валюта", "Баланс"]
+
         for code, wallet in portfolio.wallets.items():
             table.add_row([code, f"{wallet.balance:.8f}"])
+
         if not portfolio.wallets:
             print("Портфель пока пуст.")
             return
+
         print(table)
+
         try:
-            total = portfolio.get_total_value(base_currency)
+            total = portfolio.get_total_value(
+                base_currency,
+                self.rates.get_rate,
+            )
             print(f"Общая стоимость в {base_currency}: {total:.2f}")
         except ValueError as error:
             print(f"Не удалось рассчитать общую стоимость: {error}")
@@ -192,8 +214,10 @@ class ConsoleInterface:
     def add_currency(self, args: list[str]) -> None:
         """Добавляет валютный кошелёк в портфель."""
         options = self._parse_options(args, {"currency"})
+
         if not self._require_login():
             return
+
         code = options["currency"].upper()
         self.portfolios.add_currency(self.current_user.user_id, code)
         print(f"Кошелёк {code} добавлен.")
@@ -201,8 +225,10 @@ class ConsoleInterface:
     def deposit(self, args: list[str]) -> None:
         """Пополняет валютный кошелёк."""
         options = self._parse_options(args, {"currency", "amount"})
+
         if not self._require_login():
             return
+
         code = options["currency"].upper()
         amount = self._parse_amount(options["amount"])
         self.portfolios.deposit(self.current_user.user_id, code, amount)
@@ -211,8 +237,10 @@ class ConsoleInterface:
     def buy(self, args: list[str]) -> None:
         """Покупает указанное количество валюты за USD."""
         options = self._parse_options(args, {"currency", "amount"})
+
         if not self._require_login():
             return
+
         code = options["currency"].upper()
         amount = self._parse_amount(options["amount"])
         self.exchange.buy(self.current_user.user_id, code, amount)
@@ -221,8 +249,10 @@ class ConsoleInterface:
     def sell(self, args: list[str]) -> None:
         """Продаёт указанное количество валюты за USD."""
         options = self._parse_options(args, {"currency", "amount"})
+
         if not self._require_login():
             return
+
         code = options["currency"].upper()
         amount = self._parse_amount(options["amount"])
         self.exchange.sell(self.current_user.user_id, code, amount)
@@ -240,12 +270,14 @@ class ConsoleInterface:
         """Обновляет курсы через выбранный источник."""
         options = self._parse_options(args, set(), {"source"})
         source = options.get("source")
+
         if source is not None:
             source = source.lower()
             if source not in {"coingecko", "exchangerate"}:
                 raise ValueError("Источник должен быть coingecko или exchangerate.")
 
         result = self.rates.update_rates(source=source)
+
         if result["errors"]:
             print(
                 "Обновление завершено с ошибками. "
@@ -257,6 +289,7 @@ class ConsoleInterface:
             print(
                 f"Обновление успешно. Обновлено валютных пар: {result['updated_count']}"
             )
+
         print(f"Время обновления: {result['last_refresh']}")
 
     def show_rates(self, args: list[str]) -> None:
@@ -264,6 +297,7 @@ class ConsoleInterface:
         options = self._parse_options(args, set(), {"currency", "top", "base"})
         data = self.rates.show_rates()
         pairs = data.get("pairs", {})
+
         if not pairs:
             print("Сохранённых курсов нет. Выполните update-rates.")
             return
@@ -271,14 +305,17 @@ class ConsoleInterface:
         currency = options.get("currency")
         if currency:
             currency = currency.upper()
+
         base_currency = options.get("base")
         if base_currency:
             base_currency = base_currency.upper()
 
         records = []
+
         for pair, record in pairs.items():
             if not isinstance(record, dict):
                 continue
+
             currencies = pair.split("_")
             if len(currencies) != 2:
                 continue
@@ -286,6 +323,7 @@ class ConsoleInterface:
                 continue
             if base_currency and currencies[1] != base_currency:
                 continue
+
             records.append((pair, record))
 
         if "top" in options:
@@ -293,8 +331,20 @@ class ConsoleInterface:
                 top = int(options["top"])
             except ValueError as error:
                 raise ValueError("--top должен быть целым числом.") from error
+
             if top <= 0:
                 raise ValueError("--top должен быть больше нуля.")
+
+            records = [
+                (pair, record)
+                for pair, record in records
+                if pair.endswith("_USD")
+                and isinstance(
+                    CURRENCIES.get(pair.split("_")[0]),
+                    CryptoCurrency,
+                )
+            ]
+
             records.sort(
                 key=lambda item: item[1].get("rate", 0),
                 reverse=True,
@@ -309,6 +359,7 @@ class ConsoleInterface:
 
         table = PrettyTable()
         table.field_names = ["Пара", "Курс", "Источник", "Обновлено"]
+
         for pair, record in records:
             table.add_row(
                 [
@@ -318,12 +369,14 @@ class ConsoleInterface:
                     record.get("updated_at", "—"),
                 ]
             )
+
         print(table)
 
     def exit(self, args: list[str]) -> None:
         """Завершает работу приложения."""
         if args:
             raise ValueError("Использование: exit")
+
         self.running = False
         print("До свидания!")
 
