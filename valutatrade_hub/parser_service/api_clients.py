@@ -1,5 +1,6 @@
 """Клиенты внешних API для получения валютных курсов."""
 
+import math
 import os
 from abc import ABC, abstractmethod
 from typing import Any
@@ -63,7 +64,7 @@ class CoinGeckoClient(BaseApiClient):
 
             rate = coin_data.get(DEFAULT_BASE_CURRENCY.lower())
             if isinstance(rate, (int, float)) and not isinstance(rate, bool):
-                if rate > 0:
+                if math.isfinite(rate) and rate > 0:
                     rates[f"{code}_{DEFAULT_BASE_CURRENCY}"] = float(rate)
 
         if not rates:
@@ -79,7 +80,7 @@ class ExchangeRateApiClient(BaseApiClient):
         self.api_key = api_key or os.getenv("EXCHANGE_RATE_API_KEY")
 
     def fetch_rates(self) -> dict[str, float]:
-        """Возвращает курсы фиатных валют относительно USD."""
+        """Возвращает пары FIAT_USD, инвертируя курсы API USD_FIAT."""
         if not self.api_key:
             raise ApiRequestError("Не задан API-ключ ExchangeRate-API.")
 
@@ -113,8 +114,8 @@ class ExchangeRateApiClient(BaseApiClient):
 
             rate = conversion_rates.get(code)
             if isinstance(rate, (int, float)) and not isinstance(rate, bool):
-                if rate > 0:
-                    rates[f"{DEFAULT_BASE_CURRENCY}_{code}"] = float(rate)
+                if math.isfinite(rate) and rate > 0:
+                    rates[f"{code}_{DEFAULT_BASE_CURRENCY}"] = 1.0 / float(rate)
 
         if not rates:
             raise ApiRequestError("API не вернул ни одного корректного курса.")

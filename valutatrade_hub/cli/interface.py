@@ -1,5 +1,6 @@
 """Консольный интерфейс приложения ValutaTrade Hub."""
 
+import logging
 import math
 import shlex
 
@@ -276,7 +277,18 @@ class ConsoleInterface:
             if source not in {"coingecko", "exchangerate"}:
                 raise ValueError("Источник должен быть coingecko или exchangerate.")
 
-        result = self.rates.update_rates(source=source)
+        parser_logger = logging.getLogger("valutatrade_hub.parser_service")
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        parser_logger.addHandler(console_handler)
+        try:
+            result = self.rates.update_rates(source=source)
+        finally:
+            parser_logger.removeHandler(console_handler)
+            console_handler.close()
 
         if result["errors"]:
             print(

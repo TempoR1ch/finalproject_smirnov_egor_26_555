@@ -13,16 +13,21 @@ EXCHANGE_RATES_FILE = DATA_DIR / "exchange_rates.json"
 
 
 class SettingsLoader:
-    """Загружает настройки приложения из переменных окружения."""
+    """Загружает настройки приложения по паттерну Singleton."""
 
+    _instance: "SettingsLoader | None" = None
     DEFAULT_RATES_TTL_SECONDS = 300
 
-    @staticmethod
-    def get_rates_ttl() -> int:
+    def __new__(cls) -> "SettingsLoader":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def get_rates_ttl(self) -> int:
         """Возвращает срок актуальности курса в секундах."""
         raw_value = os.getenv(
             "RATES_TTL_SECONDS",
-            str(SettingsLoader.DEFAULT_RATES_TTL_SECONDS),
+            str(self.DEFAULT_RATES_TTL_SECONDS),
         )
 
         try:

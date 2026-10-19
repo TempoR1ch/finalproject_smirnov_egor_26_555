@@ -2,13 +2,22 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Mapping
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.utils import create_password_hash, verify_password
 
 DEFAULT_BASE_CURRENCY = "USD"
+FALLBACK_RATES = {
+    "EUR_USD": 1.08,
+    "GBP_USD": 1.27,
+    "JPY_USD": 0.0067,
+    "RUB_USD": 0.011,
+    "BTC_USD": 65000.0,
+    "ETH_USD": 3000.0,
+    "SOL_USD": 150.0,
+}
 
 
 class User:
@@ -159,9 +168,15 @@ class Wallet:
 class Portfolio:
     """Содержит валютные кошельки одного пользователя."""
 
-    def __init__(self, user_id: int) -> None:
-        self._user_id = user_id
+    def __init__(self, user: User | int) -> None:
+        self._user = user if isinstance(user, User) else None
+        self._user_id = user.user_id if isinstance(user, User) else int(user)
         self._wallets: dict[str, Wallet] = {}
+
+    @property
+    def user(self) -> User | None:
+        """Возвращает объект пользователя, если он был передан модели."""
+        return self._user
 
     @property
     def user_id(self) -> int:
@@ -198,43 +213,79 @@ class Portfolio:
     def get_total_value(
         self,
         base_currency: str = DEFAULT_BASE_CURRENCY,
+        rates: Mapping[str, object] | Callable[[str, str], float] | None = None,
         rate_provider: Callable[[str, str], float] | None = None,
     ) -> float:
-        """Рассчитывает общую стоимость портфеля в базовой валюте."""
+        """Рассчитывает стоимость портфеля по переданным или резервным курсам."""
         if not isinstance(base_currency, str) or not base_currency.strip():
             raise ValueError("Базовая валюта должна быть указана.")
 
         base_currency = base_currency.strip().upper()
         get_currency(base_currency)
+
+        if callable(rates):
+            rate_provider = rates
+            rates = None
+
+        def read_rate(source: str, target: str) -> float:
+            if source == target:
+                return 1.0
+
+            if rate_provider is not None:
+                value = rate_provider(source, target)
+                return self._validate_rate(value)
+
+            rate_map: Mapping[str, object] = (
+                rates if rates is not None else FALLBACK_RATES
+            )
+            nested_pairs = rate_map.get("pairs")
+            if isinstance(nested_pairs, dict):
+                rate_map = nested_pairs
+
+            def lookup(pair: str) -> float | None:
+                value = rate_map.get(pair)
+                if isinstance(value, dict):
+                    value = value.get("rate")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if math.isfinite(value) and value > 0:
+                        return float(value)
+                return None
+
+            direct = lookup(f"{source}_{target}")
+            if direct is not None:
+                return direct
+            reverse = lookup(f"{target}_{source}")
+            if reverse is not None:
+                return 1.0 / reverse
+
+            if source != DEFAULT_BASE_CURRENCY and target != DEFAULT_BASE_CURRENCY:
+                source_usd = lookup(f"{source}_{DEFAULT_BASE_CURRENCY}")
+                target_usd = lookup(f"{target}_{DEFAULT_BASE_CURRENCY}")
+                if source_usd is not None and target_usd is not None:
+                    return source_usd / target_usd
+
+            raise ValueError(f"Курс {source}/{target} отсутствует.")
+
         total = 0.0
-
         for currency_code, wallet in self._wallets.items():
-            if currency_code == base_currency:
-                total += wallet.balance
-            else:
-                if rate_provider is None:
-                    raise ValueError(
-                        "Для расчёта стоимости портфеля необходим "
-                        "источник курсов валют."
-                    )
-
-                rate = rate_provider(currency_code, base_currency)
-                if (
-                    isinstance(rate, bool)
-                    or not isinstance(rate, (int, float))
-                    or not math.isfinite(rate)
-                    or rate <= 0
-                ):
-                    raise ValueError("Курс должен быть положительным конечным числом.")
-
-                total += wallet.balance * rate
-
+            total += wallet.balance * read_rate(currency_code, base_currency)
             if not math.isfinite(total):
                 raise ValueError(
                     "Общая стоимость портфеля должна быть конечным числом."
                 )
-
         return total
+
+    @staticmethod
+    def _validate_rate(rate: object) -> float:
+        """Проверяет корректность валютного курса."""
+        if (
+            isinstance(rate, bool)
+            or not isinstance(rate, (int, float))
+            or not math.isfinite(rate)
+            or rate <= 0
+        ):
+            raise ValueError("Курс должен быть положительным конечным числом.")
+        return float(rate)
 
     def to_dict(self) -> dict[str, object]:
         """Подготавливает портфель для сохранения в JSON."""
@@ -246,9 +297,13 @@ class Portfolio:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> "Portfolio":
-        """Восстанавливает портфель из сохранённых данных."""
-        portfolio = cls(int(data["user_id"]))
+    def from_dict(
+        cls,
+        data: dict[str, object],
+        user: User | None = None,
+    ) -> "Portfolio":
+        """Восстанавливает портфель из данных и переданного объекта пользователя."""
+        portfolio = cls(user if user is not None else int(data["user_id"]))
         wallets_data = data["wallets"]
 
         if not isinstance(wallets_data, dict):

@@ -1,5 +1,6 @@
 """Конфигурация сервиса получения валютных курсов."""
 
+from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency, FiatCurrency
 from valutatrade_hub.infra.settings import (
     EXCHANGE_RATES_FILE,
     RATES_FILE,
@@ -11,8 +12,14 @@ EXCHANGE_RATE_API_URL = "https://v6.exchangerate-api.com/v6"
 API_TIMEOUT = 10
 DEFAULT_BASE_CURRENCY = "USD"
 
-FIAT_CURRENCIES = ("USD", "EUR", "GBP", "RUB")
-CRYPTO_CURRENCIES = ("BTC", "ETH", "SOL")
+FIAT_CURRENCIES = tuple(
+    code for code, currency in CURRENCIES.items() if isinstance(currency, FiatCurrency)
+)
+CRYPTO_CURRENCIES = tuple(
+    code
+    for code, currency in CURRENCIES.items()
+    if isinstance(currency, CryptoCurrency)
+)
 
 CRYPTO_ID_MAP = {
     "BTC": "bitcoin",
