@@ -2,14 +2,14 @@
 
 import math
 from datetime import datetime, timezone
-from typing import Callable, Mapping
+from typing import Mapping
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.utils import create_password_hash, verify_password
 
 DEFAULT_BASE_CURRENCY = "USD"
-FALLBACK_RATES = {
+EXCHANGE_RATES = {
     "EUR_USD": 1.08,
     "GBP_USD": 1.27,
     "JPY_USD": 0.0067,
@@ -18,6 +18,7 @@ FALLBACK_RATES = {
     "ETH_USD": 3000.0,
     "SOL_USD": 150.0,
 }
+FALLBACK_RATES = EXCHANGE_RATES
 
 
 class User:
@@ -168,9 +169,22 @@ class Wallet:
 class Portfolio:
     """Содержит валютные кошельки одного пользователя."""
 
-    def __init__(self, user: User | int) -> None:
-        self._user = user if isinstance(user, User) else None
-        self._user_id = user.user_id if isinstance(user, User) else int(user)
+    def __init__(
+        self,
+        user: User | int | None = None,
+        user_id: int | None = None,
+    ) -> None:
+        # Поддерживаем передачу объекта User (предпочтительный вариант),
+        # а также старый вызов Portfolio(user_id) для совместимости.
+        if isinstance(user, User):
+            self._user = user
+            self._user_id = user.user_id
+        elif isinstance(user, int) and not isinstance(user, bool):
+            self._user = None
+            self._user_id = user
+        else:
+            self._user = None
+            self._user_id = int(user_id) if user_id is not None else 0
         self._wallets: dict[str, Wallet] = {}
 
     @property
@@ -213,62 +227,49 @@ class Portfolio:
     def get_total_value(
         self,
         base_currency: str = DEFAULT_BASE_CURRENCY,
-        rates: Mapping[str, object] | Callable[[str, str], float] | None = None,
-        rate_provider: Callable[[str, str], float] | None = None,
+        rates: Mapping[str, object] | None = None,
     ) -> float:
-        """Рассчитывает стоимость портфеля по переданным или резервным курсам."""
+        """Рассчитывает стоимость портфеля через USD по переданным курсам."""
         if not isinstance(base_currency, str) or not base_currency.strip():
             raise ValueError("Базовая валюта должна быть указана.")
 
         base_currency = base_currency.strip().upper()
         get_currency(base_currency)
+        rate_map: Mapping[str, object] = rates if rates is not None else EXCHANGE_RATES
+        nested_pairs = rate_map.get("pairs")
+        if isinstance(nested_pairs, dict):
+            rate_map = nested_pairs
 
-        if callable(rates):
-            rate_provider = rates
-            rates = None
-
-        def read_rate(source: str, target: str) -> float:
-            if source == target:
+        def lookup_usd_rate(code: str) -> float:
+            if code == DEFAULT_BASE_CURRENCY:
                 return 1.0
 
-            if rate_provider is not None:
-                value = rate_provider(source, target)
-                return self._validate_rate(value)
+            direct = rate_map.get(f"{code}_{DEFAULT_BASE_CURRENCY}")
+            if isinstance(direct, dict):
+                direct = direct.get("rate")
+            if isinstance(direct, (int, float)) and not isinstance(direct, bool):
+                if math.isfinite(direct) and direct > 0:
+                    return float(direct)
 
-            rate_map: Mapping[str, object] = (
-                rates if rates is not None else FALLBACK_RATES
+            reverse = rate_map.get(f"{DEFAULT_BASE_CURRENCY}_{code}")
+            if isinstance(reverse, dict):
+                reverse = reverse.get("rate")
+            if isinstance(reverse, (int, float)) and not isinstance(reverse, bool):
+                if math.isfinite(reverse) and reverse > 0:
+                    return 1.0 / float(reverse)
+
+            raise ValueError(
+                f"Курс {code}/USD отсутствует; невозможно рассчитать портфель."
             )
-            nested_pairs = rate_map.get("pairs")
-            if isinstance(nested_pairs, dict):
-                rate_map = nested_pairs
 
-            def lookup(pair: str) -> float | None:
-                value = rate_map.get(pair)
-                if isinstance(value, dict):
-                    value = value.get("rate")
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    if math.isfinite(value) and value > 0:
-                        return float(value)
-                return None
+        if not self._wallets:
+            return 0.0
 
-            direct = lookup(f"{source}_{target}")
-            if direct is not None:
-                return direct
-            reverse = lookup(f"{target}_{source}")
-            if reverse is not None:
-                return 1.0 / reverse
-
-            if source != DEFAULT_BASE_CURRENCY and target != DEFAULT_BASE_CURRENCY:
-                source_usd = lookup(f"{source}_{DEFAULT_BASE_CURRENCY}")
-                target_usd = lookup(f"{target}_{DEFAULT_BASE_CURRENCY}")
-                if source_usd is not None and target_usd is not None:
-                    return source_usd / target_usd
-
-            raise ValueError(f"Курс {source}/{target} отсутствует.")
-
+        base_usd_rate = lookup_usd_rate(base_currency)
         total = 0.0
-        for currency_code, wallet in self._wallets.items():
-            total += wallet.balance * read_rate(currency_code, base_currency)
+        for code, wallet in self._wallets.items():
+            currency_usd_rate = lookup_usd_rate(code)
+            total += wallet.balance * currency_usd_rate / base_usd_rate
             if not math.isfinite(total):
                 raise ValueError(
                     "Общая стоимость портфеля должна быть конечным числом."
@@ -303,7 +304,7 @@ class Portfolio:
         user: User | None = None,
     ) -> "Portfolio":
         """Восстанавливает портфель из данных и переданного объекта пользователя."""
-        portfolio = cls(user if user is not None else int(data["user_id"]))
+        portfolio = cls(user=user, user_id=int(data["user_id"]))
         wallets_data = data["wallets"]
 
         if not isinstance(wallets_data, dict):

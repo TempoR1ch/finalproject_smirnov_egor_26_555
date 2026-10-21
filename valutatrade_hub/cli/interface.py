@@ -6,7 +6,11 @@ import shlex
 
 from prettytable import PrettyTable
 
-from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency
+from valutatrade_hub.core.currencies import (
+    CURRENCIES,
+    CryptoCurrency,
+    get_currency,
+)
 from valutatrade_hub.core.usecases import (
     ExchangeUseCases,
     PortfolioUseCases,
@@ -184,33 +188,26 @@ class ConsoleInterface:
     def show_portfolio(self, args: list[str]) -> None:
         """Показывает кошельки и общую стоимость портфеля."""
         options = self._parse_options(args, set(), {"base"})
-
         if not self._require_login():
             return
 
         base_currency = options.get("base", "USD").upper()
-        portfolio = self.portfolios.get_portfolio(self.current_user.user_id)
+        data = self.portfolios.show_portfolio(
+            self.current_user.user_id,
+            base_currency,
+        )
+        wallets = data["wallets"]
+        if not wallets:
+            print("Портфель пока пуст.")
+            print(f"Общая стоимость в {base_currency}: 0.00")
+            return
 
         table = PrettyTable()
         table.field_names = ["Валюта", "Баланс"]
-
-        for code, wallet in portfolio.wallets.items():
-            table.add_row([code, f"{wallet.balance:.8f}"])
-
-        if not portfolio.wallets:
-            print("Портфель пока пуст.")
-            return
-
+        for code, wallet in wallets.items():
+            table.add_row([code, f"{wallet['balance']:.8f}"])
         print(table)
-
-        try:
-            total = portfolio.get_total_value(
-                base_currency,
-                self.rates.get_rate,
-            )
-            print(f"Общая стоимость в {base_currency}: {total:.2f}")
-        except ValueError as error:
-            print(f"Не удалось рассчитать общую стоимость: {error}")
+        print(f"Общая стоимость в {base_currency}: {data['total_value']:.2f}")
 
     def add_currency(self, args: list[str]) -> None:
         """Добавляет валютный кошелёк в портфель."""
@@ -256,8 +253,11 @@ class ConsoleInterface:
 
         code = options["currency"].upper()
         amount = self._parse_amount(options["amount"])
-        self.exchange.sell(self.current_user.user_id, code, amount)
-        print(f"Продажа выполнена: {amount:g} {code}.")
+        proceeds = self.exchange.sell(self.current_user.user_id, code, amount)
+        print(
+            f"Продажа выполнена: {amount:g} {code}. "
+            f"Оценочная выручка: {proceeds:.2f} USD."
+        )
 
     def get_rate(self, args: list[str]) -> None:
         """Показывает курс одной валюты к другой."""
@@ -305,11 +305,10 @@ class ConsoleInterface:
         print(f"Время обновления: {result['last_refresh']}")
 
     def show_rates(self, args: list[str]) -> None:
-        """Показывает сохранённые курсы с фильтрами."""
+        """Показывает сохранённые курсы с фильтрами и выбранной базой."""
         options = self._parse_options(args, set(), {"currency", "top", "base"})
         data = self.rates.show_rates()
         pairs = data.get("pairs", {})
-
         if not pairs:
             print("Сохранённых курсов нет. Выполните update-rates.")
             return
@@ -317,25 +316,22 @@ class ConsoleInterface:
         currency = options.get("currency")
         if currency:
             currency = currency.upper()
+            get_currency(currency)
 
         base_currency = options.get("base")
         if base_currency:
             base_currency = base_currency.upper()
+            get_currency(base_currency)
 
         records = []
-
         for pair, record in pairs.items():
             if not isinstance(record, dict):
                 continue
-
             currencies = pair.split("_")
             if len(currencies) != 2:
                 continue
             if currency and currency not in currencies:
                 continue
-            if base_currency and currencies[1] != base_currency:
-                continue
-
             records.append((pair, record))
 
         if "top" in options:
@@ -343,7 +339,6 @@ class ConsoleInterface:
                 top = int(options["top"])
             except ValueError as error:
                 raise ValueError("--top должен быть целым числом.") from error
-
             if top <= 0:
                 raise ValueError("--top должен быть больше нуля.")
 
@@ -351,12 +346,8 @@ class ConsoleInterface:
                 (pair, record)
                 for pair, record in records
                 if pair.endswith("_USD")
-                and isinstance(
-                    CURRENCIES.get(pair.split("_")[0]),
-                    CryptoCurrency,
-                )
+                and isinstance(CURRENCIES.get(pair.split("_")[0]), CryptoCurrency)
             ]
-
             records.sort(
                 key=lambda item: item[1].get("rate", 0),
                 reverse=True,
@@ -365,13 +356,37 @@ class ConsoleInterface:
         else:
             records.sort(key=lambda item: item[0])
 
+        if base_currency:
+            converted_records = []
+            for pair, record in records:
+                source_code = pair.split("_")[0]
+                if source_code == base_currency:
+                    converted_rate = 1.0
+                else:
+                    try:
+                        converted_rate = self.rates.get_rate(source_code, base_currency)
+                    except Exception as error:
+                        logging.getLogger(__name__).debug(
+                            "Не удалось получить %s/%s: %s",
+                            source_code,
+                            base_currency,
+                            error,
+                        )
+                        continue
+                converted_records.append(
+                    (
+                        f"{source_code}_{base_currency}",
+                        {**record, "rate": converted_rate},
+                    )
+                )
+            records = converted_records
+
         if not records:
             print("Курсы по заданным фильтрам не найдены.")
             return
 
         table = PrettyTable()
         table.field_names = ["Пара", "Курс", "Источник", "Обновлено"]
-
         for pair, record in records:
             table.add_row(
                 [
@@ -381,7 +396,6 @@ class ConsoleInterface:
                     record.get("updated_at", "—"),
                 ]
             )
-
         print(table)
 
     def exit(self, args: list[str]) -> None:

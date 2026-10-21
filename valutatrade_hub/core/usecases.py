@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from valutatrade_hub.core.currencies import get_currency
-from valutatrade_hub.core.exceptions import ApiRequestError
+from valutatrade_hub.core.exceptions import ApiRequestError, InsufficientFundsError
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.decorators import log_action, measure_time
 from valutatrade_hub.infra.database import DatabaseManager
@@ -139,15 +139,26 @@ class PortfolioUseCases:
         raise ValueError("Портфель пользователя не найден.")
 
     @log_action
-    def show_portfolio(self, user_id: int) -> dict[str, Any]:
-        """Возвращает данные портфеля для отображения."""
+    def show_portfolio(
+        self,
+        user_id: int,
+        base_currency: str = "USD",
+    ) -> dict[str, Any]:
+        """Готовит данные портфеля и итоговую стоимость для CLI."""
+        base_currency = base_currency.strip().upper()
+        get_currency(base_currency)
         portfolio = self.get_portfolio(user_id)
+        rates_data = RatesStorage(database=self.database).get_current_rates()
+        rates = rates_data if rates_data.get("pairs") else None
+        total = portfolio.get_total_value(base_currency, rates)
         return {
             "user_id": portfolio.user_id,
             "wallets": {
                 code: wallet.get_balance_info()
                 for code, wallet in portfolio.wallets.items()
             },
+            "base_currency": base_currency,
+            "total_value": total,
         }
 
     @log_action
@@ -227,86 +238,97 @@ class ExchangeUseCases:
         self.updater = updater or RatesUpdater(storage=self.rates_storage)
 
     def get_rate(self, from_currency: str, to_currency: str) -> float:
-        """Возвращает актуальный курс из кэша или обновляет устаревшие данные."""
+        """Возвращает курс из свежего кэша, обновляя только при необходимости."""
         source = from_currency.strip().upper()
         target = to_currency.strip().upper()
         get_currency(source)
         get_currency(target)
-
         if source == target:
             return 1.0
 
-        def read_pairs() -> dict:
+        def read_pairs() -> dict[str, Any]:
             current = self.rates_storage.get_current_rates()
             pairs = current.get("pairs", {})
             if not isinstance(pairs, dict):
                 raise ValueError("Некорректный формат кэша валютных курсов.")
             return pairs
 
-        def record_rate(pairs: dict, pair: str) -> float | None:
+        ttl = SettingsLoader().get_rates_ttl()
+
+        def valid_rate(pairs: dict[str, Any], pair: str) -> float | None:
             record = pairs.get(pair)
-            if not isinstance(record, dict):
-                return None
-            rate = record.get("rate")
+            value = record.get("rate") if isinstance(record, dict) else None
             if (
-                isinstance(rate, (int, float))
-                and not isinstance(rate, bool)
-                and math.isfinite(rate)
-                and rate > 0
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and value > 0
             ):
-                return float(rate)
+                return float(value)
             return None
 
-        def cached_rate(pairs: dict) -> float | None:
-            direct = record_rate(pairs, f"{source}_{target}")
+        def pair_is_fresh(pairs: dict[str, Any], pair: str) -> bool:
+            record = pairs.get(pair)
+            updated_at = record.get("updated_at") if isinstance(record, dict) else None
+            if not isinstance(updated_at, str):
+                return False
+            try:
+                timestamp = datetime.fromisoformat(updated_at)
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+            except ValueError:
+                return False
+            age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+            return -60 <= age <= ttl
+
+        def choose_usd_rate(
+            pairs: dict[str, Any], code: str
+        ) -> tuple[float | None, str | None]:
+            direct_pair = f"{code}_USD"
+            reverse_pair = f"USD_{code}"
+            direct = valid_rate(pairs, direct_pair)
+            reverse = valid_rate(pairs, reverse_pair)
+
+            if direct is not None and pair_is_fresh(pairs, direct_pair):
+                return direct, direct_pair
+            if reverse is not None and pair_is_fresh(pairs, reverse_pair):
+                return 1.0 / reverse, reverse_pair
             if direct is not None:
-                return direct
-            reverse = record_rate(pairs, f"{target}_{source}")
+                return direct, direct_pair
             if reverse is not None:
-                return 1.0 / reverse
+                return 1.0 / reverse, reverse_pair
+            return None, None
+
+        def resolve(pairs: dict[str, Any]) -> tuple[float | None, list[str]]:
+            direct_pair = f"{source}_{target}"
+            reverse_pair = f"{target}_{source}"
+            direct = valid_rate(pairs, direct_pair)
+            reverse = valid_rate(pairs, reverse_pair)
+
+            if direct is not None and pair_is_fresh(pairs, direct_pair):
+                return direct, [direct_pair]
+            if reverse is not None and pair_is_fresh(pairs, reverse_pair):
+                return 1.0 / reverse, [reverse_pair]
+            if direct is not None:
+                return direct, [direct_pair]
+            if reverse is not None:
+                return 1.0 / reverse, [reverse_pair]
+
             if source != "USD" and target != "USD":
-                source_usd = record_rate(pairs, f"{source}_USD")
-                usd_target = record_rate(pairs, f"USD_{target}")
-                if source_usd is None:
-                    usd_source = record_rate(pairs, f"USD_{source}")
-                    source_usd = 1.0 / usd_source if usd_source else None
-                if usd_target is None:
-                    target_usd = record_rate(pairs, f"{target}_USD")
-                    usd_target = 1.0 / target_usd if target_usd else None
-                if source_usd is not None and usd_target is not None:
-                    return source_usd * usd_target
-            return None
+                source_usd, source_pair = choose_usd_rate(pairs, source)
+                target_usd, target_pair = choose_usd_rate(pairs, target)
+                if source_usd is not None and target_usd is not None:
+                    return source_usd / target_usd, [source_pair, target_pair]
+            return None, []
+
+        def is_fresh(pairs: dict[str, Any], used_pairs: list[str]) -> bool:
+            return bool(used_pairs) and all(
+                pair_is_fresh(pairs, pair) for pair in used_pairs
+            )
 
         pairs = read_pairs()
-        rate = cached_rate(pairs)
-        ttl = SettingsLoader().get_rates_ttl()
-        now = datetime.now(timezone.utc)
-        relevant_pairs = (
-            f"{source}_{target}",
-            f"{target}_{source}",
-            f"{source}_USD",
-            f"USD_{source}",
-            f"{target}_USD",
-            f"USD_{target}",
-        )
-        timestamps = []
-        for pair in relevant_pairs:
-            record = pairs.get(pair)
-            if isinstance(record, dict) and isinstance(record.get("updated_at"), str):
-                try:
-                    timestamp = datetime.fromisoformat(record["updated_at"])
-                    if timestamp.tzinfo is None:
-                        timestamp = timestamp.replace(tzinfo=timezone.utc)
-                    timestamps.append(timestamp)
-                except ValueError:
-                    timestamps.append(datetime.min.replace(tzinfo=timezone.utc))
-
-        stale = (
-            rate is None
-            or not timestamps
-            or any((now - timestamp).total_seconds() > ttl for timestamp in timestamps)
-        )
-        if stale:
+        rate, used_pairs = resolve(pairs)
+        if rate is None or not is_fresh(pairs, used_pairs):
             try:
                 self.updater.run_update()
             except ApiRequestError as error:
@@ -316,38 +338,13 @@ class ExchangeUseCases:
                     f"Подробности: {error}"
                 ) from error
             pairs = read_pairs()
-            rate = cached_rate(pairs)
-            refreshed_timestamps = []
-            for pair in relevant_pairs:
-                record = pairs.get(pair)
-                if isinstance(record, dict) and isinstance(
-                    record.get("updated_at"), str
-                ):
-                    try:
-                        timestamp = datetime.fromisoformat(record["updated_at"])
-                        if timestamp.tzinfo is None:
-                            timestamp = timestamp.replace(tzinfo=timezone.utc)
-                        refreshed_timestamps.append(timestamp)
-                    except ValueError:
-                        continue
-
-            if (
-                rate is None
-                or not refreshed_timestamps
-                or any(
-                    (datetime.now(timezone.utc) - timestamp).total_seconds() > ttl
-                    for timestamp in refreshed_timestamps
-                )
-            ):
+            rate, used_pairs = resolve(pairs)
+            if rate is None or not is_fresh(pairs, used_pairs):
                 raise ApiRequestError(
-                    f"Курс {source}/{target} не удалось обновить "
-                    "до актуального состояния."
+                    f"Курс {source}/{target} отсутствует или неактуален "
+                    "после обновления."
                 )
 
-        if rate is None:
-            raise ApiRequestError(
-                f"Курс {source}/{target} отсутствует в кэше после обновления."
-            )
         return rate
 
     @log_action
@@ -358,23 +355,17 @@ class ExchangeUseCases:
         currency_code: str,
         amount: float,
     ) -> None:
-        """Покупает валюту за USD."""
+        """Упрощённая покупка: создаёт кошелёк и увеличивает его баланс."""
         code = currency_code.strip().upper()
         get_currency(code)
-
+        self._validate_amount(amount)
         if code == "USD":
             raise ValueError("Покупка USD за USD не имеет смысла.")
 
-        self._validate_amount(amount)
-
-        rate = self.get_rate("USD", code)
-        cost = amount / rate
-
         portfolios = self.portfolios._load_portfolios()
         portfolio = self.portfolios._find_portfolio(portfolios, user_id)
-        usd_wallet = portfolio.get_wallet("USD")
-        usd_wallet.withdraw(cost)
-        self.portfolios._get_or_create_wallet(portfolio, code).deposit(amount)
+        wallet = self.portfolios._get_or_create_wallet(portfolio, code)
+        wallet.deposit(amount)
         self.portfolios._save_portfolios(portfolios)
 
     @log_action
@@ -384,25 +375,28 @@ class ExchangeUseCases:
         user_id: int,
         currency_code: str,
         amount: float,
-    ) -> None:
-        """Продаёт валюту и зачисляет выручку в USD."""
+    ) -> float:
+        """Упрощённая продажа: уменьшает баланс и возвращает оценку выручки USD."""
         code = currency_code.strip().upper()
         get_currency(code)
-
+        self._validate_amount(amount)
         if code == "USD":
             raise ValueError("Продажа USD за USD не имеет смысла.")
-
-        self._validate_amount(amount)
-
-        rate = self.get_rate(code, "USD")
-        proceeds = amount * rate
 
         portfolios = self.portfolios._load_portfolios()
         portfolio = self.portfolios._find_portfolio(portfolios, user_id)
         wallet = portfolio.get_wallet(code)
+        if amount > wallet.balance:
+            raise InsufficientFundsError(wallet.balance, amount, code)
+
+        rate = self.get_rate(code, "USD")
+        proceeds = amount * rate
+        if not math.isfinite(proceeds):
+            raise ValueError("Оценочная выручка должна быть конечным числом.")
+
         wallet.withdraw(amount)
-        self.portfolios._get_or_create_wallet(portfolio, "USD").deposit(proceeds)
         self.portfolios._save_portfolios(portfolios)
+        return proceeds
 
     @staticmethod
     def _validate_amount(amount: float) -> None:
