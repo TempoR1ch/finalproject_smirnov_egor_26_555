@@ -7,6 +7,8 @@ from functools import wraps
 from time import perf_counter
 from typing import Any
 
+from valutatrade_hub.infra.settings import DEFAULT_BASE_CURRENCY
+
 logger = logging.getLogger(__name__)
 
 
@@ -113,7 +115,7 @@ def log_action(
                 and context["amount"] > 0
             ):
                 fields.append(f"rate={result / context['amount']:.8g}")
-                fields.append("base=USD")
+                fields.append(f"base={DEFAULT_BASE_CURRENCY}")
                 fields.append(f"proceeds={result:.8g}")
 
             fields.append("result=OK")

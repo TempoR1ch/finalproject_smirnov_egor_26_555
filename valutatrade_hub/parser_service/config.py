@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from valutatrade_hub.core.currencies import CURRENCIES, CryptoCurrency, FiatCurrency
 from valutatrade_hub.infra.settings import (
+    DEFAULT_BASE_CURRENCY,
     EXCHANGE_RATES_FILE,
     RATES_FILE,
 )
@@ -12,7 +13,6 @@ COINGECKO_API_URL = "https://api.coingecko.com/api/v3/simple/price"
 EXCHANGE_RATE_API_URL = "https://v6.exchangerate-api.com/v6"
 
 API_TIMEOUT = 10
-DEFAULT_BASE_CURRENCY = "USD"
 
 FIAT_CURRENCIES = tuple(
     code for code, currency in CURRENCIES.items() if isinstance(currency, FiatCurrency)
@@ -45,6 +45,7 @@ class ParserConfig:
     base_currency: str = DEFAULT_BASE_CURRENCY
 
     def __post_init__(self) -> None:
+        """Проверяет корректность параметров конфигурации."""
         expected_fiat = {
             code
             for code, currency in CURRENCIES.items()

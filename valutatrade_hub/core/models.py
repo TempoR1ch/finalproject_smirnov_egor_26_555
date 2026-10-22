@@ -7,8 +7,8 @@ from typing import Mapping
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.utils import create_password_hash, verify_password
+from valutatrade_hub.infra.settings import DEFAULT_BASE_CURRENCY
 
-DEFAULT_BASE_CURRENCY = "USD"
 EXCHANGE_RATES = {
     "EUR_USD": 1.08,
     "GBP_USD": 1.27,

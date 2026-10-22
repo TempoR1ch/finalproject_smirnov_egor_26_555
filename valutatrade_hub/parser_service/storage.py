@@ -73,8 +73,10 @@ class RatesStorage:
         for pair, rate in rates.items():
             from_currency, to_currency = pair.split("_", maxsplit=1)
             timestamp_dt = datetime.now(timezone.utc)
-            timestamp = timestamp_dt.isoformat()
-            timestamp_id = timestamp_dt.strftime("%Y%m%dT%H%M%S%fZ")
+            timestamp = timestamp_dt.isoformat(timespec="microseconds").replace(
+                "+00:00", "Z"
+            )
+            timestamp_id = timestamp
 
             record_id = f"{from_currency}_{to_currency}_{timestamp_id}"
             suffix = 1

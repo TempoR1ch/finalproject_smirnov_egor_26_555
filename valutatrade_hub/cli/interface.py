@@ -22,6 +22,7 @@ from valutatrade_hub.core.usecases import (
     RatesUseCases,
     UserUseCases,
 )
+from valutatrade_hub.infra.settings import DEFAULT_BASE_CURRENCY
 
 logger = logging.getLogger(__name__)
 
@@ -181,11 +182,23 @@ class ConsoleInterface:
             [
                 ["register", "--username --password", "Регистрация пользователя"],
                 ["login", "--username --password", "Вход в аккаунт"],
-                ["show-portfolio", "[--base USD]", "Просмотр портфеля"],
+                [
+                    "show-portfolio",
+                    f"[--base {DEFAULT_BASE_CURRENCY}]",
+                    "Просмотр портфеля",
+                ],
                 ["add-currency", "--currency", "Добавление кошелька"],
                 ["deposit", "--currency --amount", "Пополнение кошелька"],
-                ["buy", "--currency --amount", "Покупка валюты за USD"],
-                ["sell", "--currency --amount", "Продажа валюты за USD"],
+                [
+                    "buy",
+                    "--currency --amount",
+                    f"Покупка валюты за {DEFAULT_BASE_CURRENCY}",
+                ],
+                [
+                    "sell",
+                    "--currency --amount",
+                    f"Продажа валюты за {DEFAULT_BASE_CURRENCY}",
+                ],
                 ["get-rate", "--from --to", "Получение курса валют"],
                 [
                     "update-rates",
@@ -222,7 +235,7 @@ class ConsoleInterface:
             return
 
         options = self._parse_options(args, set(), {"base"})
-        base_currency = options.get("base", "USD").upper()
+        base_currency = options.get("base", DEFAULT_BASE_CURRENCY).upper()
         get_currency(base_currency)
 
         data = self.portfolios.show_portfolio(
@@ -267,7 +280,7 @@ class ConsoleInterface:
         print(f"Баланс {code} пополнен на {amount:.8g}.")
 
     def buy(self, args: list[str]) -> None:
-        """Покупает указанное количество валюты за USD."""
+        """Покупает указанное количество валюты за базовую валюту."""
         options = self._parse_options(args, {"currency", "amount"})
         if not self._require_login():
             return
@@ -278,7 +291,7 @@ class ConsoleInterface:
         print(f"Куплено {amount:.8g} {code}.")
 
     def sell(self, args: list[str]) -> None:
-        """Продаёт валюту и показывает оценочную выручку в USD."""
+        """Продаёт валюту и показывает оценочную выручку в базовой валюте."""
         options = self._parse_options(args, {"currency", "amount"})
         if not self._require_login():
             return
@@ -286,7 +299,10 @@ class ConsoleInterface:
         code = options["currency"].upper()
         amount = self._parse_amount(options["amount"])
         proceeds = self.exchange.sell(self.current_user.user_id, code, amount)
-        print(f"Продано {amount:.8g} {code}. Выручка: {proceeds:.2f} USD.")
+        print(
+            f"Продано {amount:.8g} {code}. "
+            f"Выручка: {proceeds:.2f} {DEFAULT_BASE_CURRENCY}."
+        )
 
     def get_rate(self, args: list[str]) -> None:
         """Показывает курс одной валюты к другой."""
@@ -355,7 +371,7 @@ class ConsoleInterface:
             currency = currency.upper()
             get_currency(currency)
 
-        base_currency = options.get("base", "USD").upper()
+        base_currency = options.get("base", DEFAULT_BASE_CURRENCY).upper()
         get_currency(base_currency)
 
         records = []
@@ -368,7 +384,7 @@ class ConsoleInterface:
             source_code, target_code = pair.split("_", maxsplit=1)
             if currency and source_code != currency:
                 continue
-            if target_code != "USD":
+            if target_code != DEFAULT_BASE_CURRENCY:
                 continue
 
             rate = record.get("rate")

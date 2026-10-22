@@ -10,14 +10,16 @@ from valutatrade_hub.core.exceptions import ApiRequestError, InsufficientFundsEr
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.decorators import log_action, measure_time
 from valutatrade_hub.infra.database import DatabaseManager
-from valutatrade_hub.infra.settings import SettingsLoader
+from valutatrade_hub.infra.settings import (
+    DEFAULT_BASE_CURRENCY,
+    PORTFOLIOS_FILE,
+    USERS_FILE,
+    SettingsLoader,
+)
 from valutatrade_hub.parser_service.storage import RatesStorage
 from valutatrade_hub.parser_service.updater import RatesUpdater
 
 logger = logging.getLogger(__name__)
-
-USERS_PATH = "data/users.json"
-PORTFOLIOS_PATH = "data/portfolios.json"
 
 
 class UserUseCases:
@@ -28,7 +30,7 @@ class UserUseCases:
 
     def _load_users(self) -> list[User]:
         """Загружает пользователей из JSON."""
-        records = self.database.read_json(USERS_PATH, default=[])
+        records = self.database.read_json(USERS_FILE, default=[])
         if not isinstance(records, list):
             raise ValueError("Файл пользователей содержит неверный формат.")
 
@@ -39,7 +41,7 @@ class UserUseCases:
     def _save_users(self, users: list[User]) -> None:
         """Сохраняет пользователей в JSON."""
         self.database.write_json(
-            USERS_PATH,
+            USERS_FILE,
             [user.to_dict() for user in users],
         )
 
@@ -92,11 +94,11 @@ class PortfolioUseCases:
 
     def _load_portfolios(self) -> list[Portfolio]:
         """Загружает портфели из JSON."""
-        records = self.database.read_json(PORTFOLIOS_PATH, default=[])
+        records = self.database.read_json(PORTFOLIOS_FILE, default=[])
         if not isinstance(records, list):
             raise ValueError("Файл портфелей содержит неверный формат.")
 
-        user_records = self.database.read_json(USERS_PATH, default=[])
+        user_records = self.database.read_json(USERS_FILE, default=[])
         users = {}
         if isinstance(user_records, list):
             for record in user_records:
@@ -114,7 +116,7 @@ class PortfolioUseCases:
     def _save_portfolios(self, portfolios: list[Portfolio]) -> None:
         """Сохраняет портфели в JSON."""
         self.database.write_json(
-            PORTFOLIOS_PATH,
+            PORTFOLIOS_FILE,
             [portfolio.to_dict() for portfolio in portfolios],
         )
 
@@ -143,7 +145,7 @@ class PortfolioUseCases:
     def show_portfolio(
         self,
         user_id: int,
-        base_currency: str = "USD",
+        base_currency: str = DEFAULT_BASE_CURRENCY,
     ) -> dict[str, Any]:
         """Готовит данные портфеля и итоговую стоимость для CLI."""
         base_currency = base_currency.strip().upper()
@@ -285,8 +287,8 @@ class ExchangeUseCases:
         def choose_usd_rate(
             pairs: dict[str, Any], code: str
         ) -> tuple[float | None, str | None]:
-            direct_pair = f"{code}_USD"
-            reverse_pair = f"USD_{code}"
+            direct_pair = f"{code}_{DEFAULT_BASE_CURRENCY}"
+            reverse_pair = f"{DEFAULT_BASE_CURRENCY}_{code}"
             direct = valid_rate(pairs, direct_pair)
             reverse = valid_rate(pairs, reverse_pair)
 
@@ -315,7 +317,7 @@ class ExchangeUseCases:
             if reverse is not None:
                 return 1.0 / reverse, [reverse_pair]
 
-            if source != "USD" and target != "USD":
+            if source != DEFAULT_BASE_CURRENCY and target != DEFAULT_BASE_CURRENCY:
                 source_usd, source_pair = choose_usd_rate(pairs, source)
                 target_usd, target_pair = choose_usd_rate(pairs, target)
                 if source_usd is not None and target_usd is not None:
@@ -360,8 +362,11 @@ class ExchangeUseCases:
         code = currency_code.strip().upper()
         get_currency(code)
         self._validate_amount(amount)
-        if code == "USD":
-            raise ValueError("Покупка USD за USD не имеет смысла.")
+        if code == DEFAULT_BASE_CURRENCY:
+            raise ValueError(
+                f"Покупка {DEFAULT_BASE_CURRENCY} за "
+                f"{DEFAULT_BASE_CURRENCY} не имеет смысла."
+            )
 
         portfolios = self.portfolios._load_portfolios()
         portfolio = self.portfolios._find_portfolio(portfolios, user_id)
@@ -377,12 +382,15 @@ class ExchangeUseCases:
         currency_code: str,
         amount: float,
     ) -> float:
-        """Упрощённая продажа: уменьшает баланс и возвращает выручку в USD."""
+        """Упрощённая продажа: уменьшает баланс и возвращает выручку в базе."""
         code = currency_code.strip().upper()
         get_currency(code)
         self._validate_amount(amount)
-        if code == "USD":
-            raise ValueError("Продажа USD за USD не имеет смысла.")
+        if code == DEFAULT_BASE_CURRENCY:
+            raise ValueError(
+                f"Продажа {DEFAULT_BASE_CURRENCY} за "
+                f"{DEFAULT_BASE_CURRENCY} не имеет смысла."
+            )
 
         portfolios = self.portfolios._load_portfolios()
         portfolio = self.portfolios._find_portfolio(portfolios, user_id)
@@ -390,7 +398,7 @@ class ExchangeUseCases:
         if amount > wallet.balance:
             raise InsufficientFundsError(wallet.balance, amount, code)
 
-        rate = self.get_rate(code, "USD")
+        rate = self.get_rate(code, DEFAULT_BASE_CURRENCY)
         proceeds = amount * rate
         if not math.isfinite(proceeds):
             raise ValueError("Оценочная выручка должна быть конечным числом.")
