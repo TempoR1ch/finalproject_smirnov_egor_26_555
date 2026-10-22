@@ -6,42 +6,81 @@ from pathlib import Path
 
 LOG_DIRECTORY = Path("logs")
 LOG_FILE = LOG_DIRECTORY / "valutatrade.log"
+PARSER_LOG_FILE = LOG_DIRECTORY / "parser.log"
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 MAX_LOG_SIZE = 1_000_000
 BACKUP_COUNT = 3
 
 
-def setup_logging() -> None:
-    """Настраивает запись логов в файл и вывод ошибок в консоль."""
-    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+def _add_rotating_handler(
+    logger: logging.Logger,
+    file_path: Path,
+    level: int,
+) -> None:
+    """Добавляет файловый обработчик, если он ещё не настроен."""
+    resolved_path = str(file_path.resolve())
 
-    formatter = logging.Formatter(
-        fmt=LOG_FORMAT,
-        datefmt=DATE_FORMAT,
-    )
+    for handler in logger.handlers:
+        if (
+            isinstance(handler, RotatingFileHandler)
+            and handler.baseFilename == resolved_path
+        ):
+            handler.setLevel(level)
+            return
 
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-
-    # Не добавляем обработчики повторно при повторном вызове.
-    if root_logger.handlers:
-        return
-
-    file_handler = RotatingFileHandler(
-        LOG_FILE,
+    handler = RotatingFileHandler(
+        file_path,
         maxBytes=MAX_LOG_SIZE,
         backupCount=BACKUP_COUNT,
         encoding="utf-8",
     )
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
+    handler.setLevel(level)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt=LOG_FORMAT,
+            datefmt=DATE_FORMAT,
+        )
+    )
+    logger.addHandler(handler)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.ERROR)
-    console_handler.setFormatter(formatter)
 
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+def setup_logging() -> None:
+    """Настраивает общие логи и подробное логирование парсера."""
+    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    _add_rotating_handler(
+        root_logger,
+        LOG_FILE,
+        logging.INFO,
+    )
+
+    if not any(
+        getattr(handler, "_valutatrade_console", False)
+        for handler in root_logger.handlers
+    ):
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.ERROR)
+        console_handler.setFormatter(
+            logging.Formatter(
+                fmt=LOG_FORMAT,
+                datefmt=DATE_FORMAT,
+            )
+        )
+        console_handler._valutatrade_console = True
+        root_logger.addHandler(console_handler)
+
+    parser_logger = logging.getLogger("valutatrade_hub.parser_service")
+    parser_logger.setLevel(logging.DEBUG)
+    parser_logger.propagate = False
+
+    _add_rotating_handler(
+        parser_logger,
+        PARSER_LOG_FILE,
+        logging.DEBUG,
+    )

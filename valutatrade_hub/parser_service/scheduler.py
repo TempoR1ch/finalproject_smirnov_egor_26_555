@@ -15,7 +15,7 @@ class RatesScheduler:
 
     def __init__(self, updater: RatesUpdater | None = None) -> None:
         self.updater = updater or RatesUpdater()
-        self.interval = SettingsLoader.get_rates_ttl()
+        self.interval = SettingsLoader().get_rates_ttl()
         self._stop_event = Event()
         self._thread: Thread | None = None
 

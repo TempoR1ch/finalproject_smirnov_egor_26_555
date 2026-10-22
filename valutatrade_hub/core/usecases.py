@@ -69,6 +69,7 @@ class UserUseCases:
         logger.info("Зарегистрирован пользователь: %s", user.username)
         return user
 
+    @log_action
     def login(self, username: str, password: str) -> User:
         """Проверяет имя пользователя и пароль."""
         normalized_username = username.strip().casefold()
@@ -169,7 +170,7 @@ class PortfolioUseCases:
         portfolio.add_currency(currency_code)
         self._save_portfolios(portfolios)
 
-    @log_action
+    @log_action(verbose=True)
     def deposit(
         self,
         user_id: int,
@@ -183,7 +184,7 @@ class PortfolioUseCases:
         wallet.deposit(amount)
         self._save_portfolios(portfolios)
 
-    @log_action
+    @log_action(verbose=True)
     def withdraw(
         self,
         user_id: int,
@@ -347,7 +348,7 @@ class ExchangeUseCases:
 
         return rate
 
-    @log_action
+    @log_action(verbose=True)
     @measure_time
     def buy(
         self,
@@ -355,7 +356,7 @@ class ExchangeUseCases:
         currency_code: str,
         amount: float,
     ) -> None:
-        """Упрощённая покупка: создаёт кошелёк и увеличивает его баланс."""
+        """Упрощённая покупка: увеличивает баланс валютного кошелька."""
         code = currency_code.strip().upper()
         get_currency(code)
         self._validate_amount(amount)
@@ -368,7 +369,7 @@ class ExchangeUseCases:
         wallet.deposit(amount)
         self.portfolios._save_portfolios(portfolios)
 
-    @log_action
+    @log_action(verbose=True)
     @measure_time
     def sell(
         self,
@@ -376,7 +377,7 @@ class ExchangeUseCases:
         currency_code: str,
         amount: float,
     ) -> float:
-        """Упрощённая продажа: уменьшает баланс и возвращает оценку выручки USD."""
+        """Упрощённая продажа: уменьшает баланс и возвращает выручку в USD."""
         code = currency_code.strip().upper()
         get_currency(code)
         self._validate_amount(amount)

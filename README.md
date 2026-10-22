@@ -131,6 +131,5 @@ JSON-файлы записываются атомарно через време�
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest
 uv build
 ```

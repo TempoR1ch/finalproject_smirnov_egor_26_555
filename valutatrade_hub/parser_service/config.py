@@ -15,9 +15,7 @@ API_TIMEOUT = 10
 DEFAULT_BASE_CURRENCY = "USD"
 
 FIAT_CURRENCIES = tuple(
-    code
-    for code, currency in CURRENCIES.items()
-    if isinstance(currency, FiatCurrency)
+    code for code, currency in CURRENCIES.items() if isinstance(currency, FiatCurrency)
 )
 
 CRYPTO_CURRENCIES = tuple(
@@ -42,9 +40,7 @@ class ParserConfig:
 
     fiat_currencies: tuple[str, ...] = FIAT_CURRENCIES
     crypto_currencies: tuple[str, ...] = CRYPTO_CURRENCIES
-    crypto_id_map: dict[str, str] = field(
-        default_factory=lambda: CRYPTO_ID_MAP.copy()
-    )
+    crypto_id_map: dict[str, str] = field(default_factory=lambda: CRYPTO_ID_MAP.copy())
     api_timeout: int = API_TIMEOUT
     base_currency: str = DEFAULT_BASE_CURRENCY
 
@@ -55,9 +51,7 @@ class ParserConfig:
             if isinstance(currency, FiatCurrency)
         }
         if set(self.fiat_currencies) != expected_fiat:
-            raise ValueError(
-                "Список фиатных валют должен совпадать с реестром валют."
-            )
+            raise ValueError("Список фиатных валют должен совпадать с реестром валют.")
 
         expected_crypto = {
             code
@@ -65,14 +59,10 @@ class ParserConfig:
             if isinstance(currency, CryptoCurrency)
         }
         if set(self.crypto_currencies) != expected_crypto:
-            raise ValueError(
-                "Список криптовалют должен совпадать с реестром валют."
-            )
+            raise ValueError("Список криптовалют должен совпадать с реестром валют.")
 
         if set(self.crypto_id_map) != set(self.crypto_currencies):
-            raise ValueError(
-                "Для каждой криптовалюты должен быть задан API ID."
-            )
+            raise ValueError("Для каждой криптовалюты должен быть задан API ID.")
 
         if any(
             not isinstance(api_id, str) or not api_id.strip()
