@@ -174,8 +174,6 @@ class Portfolio:
         user: User | int | None = None,
         user_id: int | None = None,
     ) -> None:
-        # Поддерживаем передачу объекта User (предпочтительный вариант),
-        # а также старый вызов Portfolio(user_id) для совместимости.
         if isinstance(user, User):
             self._user = user
             self._user_id = user.user_id
